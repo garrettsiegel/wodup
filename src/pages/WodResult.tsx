@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Button } from '../components/ui/Button'
 import type { GeneratedWod, Modality, PrescribedMovement } from '../lib/wod/types'
+import { swapMovement } from '../lib/wod/generator'
 
 type WodResultProps = {
   wod: GeneratedWod
@@ -26,12 +27,13 @@ const ScoreBadge = ({ scoreType }: { scoreType: GeneratedWod['scoreType'] }) => 
 }
 
 // Build lookup: normalized name → movement metadata
-type MovementMeta = { coachingCue?: string; modality?: Modality }
+type MovementMeta = { coachingCue?: string; modality?: Modality; movementIndex: number }
 
 function buildMetaMap(movements: PrescribedMovement[]): Map<string, MovementMeta> {
   const map = new Map<string, MovementMeta>()
-  for (const m of movements) {
-    map.set(normalize(m.name), { coachingCue: m.coachingCue, modality: m.modality })
+  for (let i = 0; i < movements.length; i++) {
+    const m = movements[i]
+    map.set(normalize(m.name), { coachingCue: m.coachingCue, modality: m.modality, movementIndex: i })
   }
   return map
 }
@@ -74,13 +76,25 @@ const MovementInfo = ({ name, cue }: { name: string; cue?: string }) => (
   </div>
 )
 
+const SwapButton = ({ onClick }: { onClick: () => void }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    aria-label="Swap exercise"
+    className="shrink-0 w-5 h-5 rounded-full border border-gray-600 text-gray-500 hover:border-orange-400 hover:text-orange-400 text-xs flex items-center justify-center transition-colors cursor-pointer"
+  >
+    ↻
+  </button>
+)
+
 type WorkoutLineProps = {
   line: string
   isFirst: boolean
   metaMap: Map<string, MovementMeta>
+  onSwap: (index: number) => void
 }
 
-function WorkoutLine({ line, isFirst, metaMap }: WorkoutLineProps) {
+function WorkoutLine({ line, isFirst, metaMap, onSwap }: WorkoutLineProps) {
   const [showInfo, setShowInfo] = useState(false)
   const trimmed = line.trim()
 
@@ -113,6 +127,7 @@ function WorkoutLine({ line, isFirst, metaMap }: WorkoutLineProps) {
           <span className="text-gray-500 text-sm w-14 shrink-0">{emomMatch[1]}</span>
           <span className="text-white">{display}</span>
           {meta?.modality && <ModalityBadge modality={meta.modality} />}
+          {meta && <SwapButton onClick={() => onSwap(meta.movementIndex)} />}
           {meta && <InfoToggle open={showInfo} onToggle={() => setShowInfo(!showInfo)} />}
         </div>
         {showInfo && meta && <MovementInfo name={name} cue={meta.coachingCue} />}
@@ -134,6 +149,7 @@ function WorkoutLine({ line, isFirst, metaMap }: WorkoutLineProps) {
           <span className="text-white font-semibold text-base">{name}</span>
           {loadMatch && <span className="text-gray-500 text-sm">({loadMatch[2]})</span>}
           {meta?.modality && <ModalityBadge modality={meta.modality} />}
+          {meta && <SwapButton onClick={() => onSwap(meta.movementIndex)} />}
           {meta && <InfoToggle open={showInfo} onToggle={() => setShowInfo(!showInfo)} />}
         </div>
         {showInfo && meta && <MovementInfo name={name} cue={meta.coachingCue} />}
@@ -152,6 +168,7 @@ function WorkoutLine({ line, isFirst, metaMap }: WorkoutLineProps) {
           <span className="text-white font-semibold text-base">{name}</span>
           <span className="text-gray-500 text-sm">({loadOnlyMatch[2]})</span>
           {meta?.modality && <ModalityBadge modality={meta.modality} />}
+          {meta && <SwapButton onClick={() => onSwap(meta.movementIndex)} />}
           {meta && <InfoToggle open={showInfo} onToggle={() => setShowInfo(!showInfo)} />}
         </div>
         {showInfo && meta && <MovementInfo name={name} cue={meta.coachingCue} />}
@@ -166,6 +183,7 @@ function WorkoutLine({ line, isFirst, metaMap }: WorkoutLineProps) {
       <div className="flex items-baseline gap-3 py-2 pl-14 border-b border-gray-800/60 last:border-0">
         <span className="text-white font-semibold text-base">{trimmed}</span>
         {meta?.modality && <ModalityBadge modality={meta.modality} />}
+        {meta && <SwapButton onClick={() => onSwap(meta.movementIndex)} />}
         {meta && <InfoToggle open={showInfo} onToggle={() => setShowInfo(!showInfo)} />}
       </div>
       {showInfo && meta && <MovementInfo name={trimmed} cue={meta.coachingCue} />}
@@ -196,7 +214,7 @@ function parseNameAndDisplay(text: string): { name: string; display: string } {
   return { name: text.trim(), display: text }
 }
 
-const WhiteboardCard = ({ wod }: { wod: GeneratedWod }) => {
+const WhiteboardCard = ({ wod, onSwap }: { wod: GeneratedWod; onSwap: (index: number) => void }) => {
   const lines = wod.workoutText.split('\n')
   const firstContentIdx = lines.findIndex((l) => l.trim().length > 0)
   const metaMap = buildMetaMap(wod.movements)
@@ -210,7 +228,7 @@ const WhiteboardCard = ({ wod }: { wod: GeneratedWod }) => {
           <ScoreBadge scoreType={wod.scoreType} />
         </div>
         {lines.map((line, i) => (
-          <WorkoutLine key={i} line={line} isFirst={i === firstContentIdx} metaMap={metaMap} />
+          <WorkoutLine key={i} line={line} isFirst={i === firstContentIdx} metaMap={metaMap} onSwap={onSwap} />
         ))}
       </div>
     </div>
@@ -311,8 +329,11 @@ function buildCopyText(wod: GeneratedWod): string {
   return parts.join('\n')
 }
 
-export const WodResult = ({ wod, onRegenerate, onSave }: WodResultProps) => {
+export const WodResult = ({ wod: initialWod, onRegenerate, onSave }: WodResultProps) => {
+  const [wod, setWod] = useState(initialWod)
   const [copied, setCopied] = useState(false)
+
+  const handleSwap = (index: number) => setWod((prev) => swapMovement(prev, index))
 
   const handleCopy = () => {
     navigator.clipboard.writeText(buildCopyText(wod)).then(() => {
@@ -325,7 +346,7 @@ export const WodResult = ({ wod, onRegenerate, onSave }: WodResultProps) => {
     <div className="min-h-screen bg-gray-950 text-white px-4 py-10">
       <div className="max-w-2xl mx-auto space-y-6">
         {wod.warmup && <WarmupCard warmup={wod.warmup} />}
-        <WhiteboardCard wod={wod} />
+        <WhiteboardCard wod={wod} onSwap={handleSwap} />
         <DetailPanel wod={wod} />
         <p className="text-gray-700 text-xs leading-relaxed px-1">{wod.safetyNote}</p>
 

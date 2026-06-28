@@ -231,7 +231,12 @@ function prescribe(
     { intensity: request.intensity, timeAvailable: request.timeAvailable, movementCount: template.movementSlots.length, format: template.format },
     state, loadNote,
   )
-  const withMod: PrescribedMovement = { ...pm, modality: deriveModality(ex) }
+  const withMod: PrescribedMovement = {
+    ...pm,
+    modality: deriveModality(ex),
+    slotPattern: slot.pattern,
+    slotRepScheme: slot.repScheme,
+  }
   return ex.coachingCue ? { ...withMod, coachingCue: ex.coachingCue } : withMod
 }
 
@@ -358,5 +363,54 @@ export function generateWod(rawRequest: WodRequest): GeneratedWod {
     brief,
     warmup,
     scalingTiers,
+    resolvedScheme,
+    request,
   }
+}
+
+export function swapMovement(wod: GeneratedWod, movementIndex: number): GeneratedWod {
+  const movement = wod.movements[movementIndex]
+  if (!movement?.slotPattern) return wod
+
+  const equipment = normalizeEquipment(wod.request.equipment as Equipment[])
+  const pool = filterExercises(wod.request, equipment)
+
+  const usedIds = new Set(
+    wod.movements.filter((_, i) => i !== movementIndex).map((m) => m.exerciseId),
+  )
+
+  const newEx = pickExercise(movement.slotPattern, pool, usedIds, wod.request.intensity)
+  if (!newEx) return wod
+
+  const newMovement: PrescribedMovement = {
+    exerciseId: newEx.id,
+    name: newEx.name,
+    reps:      movement.reps,
+    rounds:    movement.rounds,
+    duration:  movement.duration,
+    distance:  movement.distance,
+    calories:  movement.calories,
+    loadNote:  newEx.rxLoad ? scaleLoad(newEx.rxLoad, wod.request.skillLevel) : undefined,
+    coachingCue: newEx.coachingCue,
+    modality:  deriveModality(newEx),
+    slotPattern:   movement.slotPattern,
+    slotRepScheme: movement.slotRepScheme,
+  }
+
+  const newMovements = wod.movements.map((m, i) => (i === movementIndex ? newMovement : m))
+  const exercisesByName = new Map(EXERCISES.map((e) => [e.name.toLowerCase(), e]))
+
+  const workoutText = buildWorkoutText(newMovements, wod.format, wod.durationMinutes, wod.resolvedScheme)
+  const scaling = buildScaling(newMovements, EXERCISES, wod.resolvedScheme)
+  const scalingTiers = buildScalingTiers(newMovements, EXERCISES, wod.resolvedScheme)
+  const substitutions = newMovements.map((m) => {
+    const ex = EXERCISES.find((e) => e.id === m.exerciseId)
+    if (!ex) return { movement: m.name, alternatives: [] }
+    return { movement: ex.name, alternatives: getSubstitutions(ex, equipment, exercisesByName) }
+  })
+  const title = movementIndex < 3
+    ? buildTitle({ format: wod.format } as WodTemplate, newMovements, wod.durationMinutes)
+    : wod.title
+
+  return { ...wod, title, workoutText, movements: newMovements, scaling, substitutions, scalingTiers }
 }

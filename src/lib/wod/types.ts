@@ -124,6 +124,8 @@ export type PrescribedMovement = {
   loadNote?: string
   coachingCue?: string
   modality?: Modality
+  slotPattern?: MovementPattern
+  slotRepScheme?: RepScheme
 }
 
 // Coach's whiteboard brief — target, feel, pacing, scaling trigger
@@ -172,4 +174,6 @@ export type GeneratedWod = {
   brief?: CoachBrief
   warmup?: WarmupBlock
   scalingTiers?: ScalingTiers
+  resolvedScheme: import('./scoring').RepSchemeKind
+  request: WodRequest
 }
